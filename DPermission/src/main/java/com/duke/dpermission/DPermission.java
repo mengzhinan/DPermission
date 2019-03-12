@@ -31,72 +31,61 @@ import java.util.Iterator;
 
 /**
  * @Author: duke
- * @DateTime: 2019-03-11 15:15
+ * @DateTime: 2019-03-12 13:33
  * @Description: 请求权限代理类
  */
 public class DPermission {
 
     private static final String TAG_FRAGMENT = String.valueOf(DPermission.class.getName().hashCode());
 
-    private WeakReference<DPermissionFragment> mFragmentWeakReference;
+    private WeakReference<DFragment> mFragmentWeakReference;
 
-    private PermissionCallback mPermissionCallback;
+    private DCallback mDCallback;
 
-    public DPermission setCallback(PermissionCallback permissionCallback) {
-        this.mPermissionCallback = permissionCallback;
+    public DPermission setCallback(DCallback dCallback) {
+        this.mDCallback = dCallback;
+        DFragment fragment = getCurrentFragment();
+        if (fragment != null) {
+            fragment.mDCallback = dCallback;
+        }
         return this;
     }
 
-    private DPermissionFragment getCurrentFragment() {
-        if (mFragmentWeakReference != null && mFragmentWeakReference.get() != null) {
+    private DFragment getCurrentFragment() {
+        if (mFragmentWeakReference != null &&
+                mFragmentWeakReference.get() != null &&
+                mFragmentWeakReference.get().isAdded()) {
             return mFragmentWeakReference.get();
         }
         return null;
     }
 
-    public DPermission(@NonNull final FragmentActivity activity) {
-        this(activity.getSupportFragmentManager());
+
+    public static DPermission newInstance(@NonNull final FragmentActivity activity) {
+        return new DPermission(activity.getSupportFragmentManager());
     }
 
-    public DPermission(@NonNull final Fragment fragment) {
-        this(fragment.getChildFragmentManager());
+    public static DPermission newInstance(@NonNull final Fragment fragment) {
+        return new DPermission(fragment.getChildFragmentManager());
     }
 
-    public DPermission(@NonNull final FragmentManager fragmentManager) {
-        DPermissionFragment permissionsFragment = (DPermissionFragment) fragmentManager.findFragmentByTag(TAG_FRAGMENT);
-        if (permissionsFragment == null) {
-            permissionsFragment = new DPermissionFragment();
+    private DPermission(@NonNull final FragmentManager fragmentManager) {
+        DFragment dFragment = (DFragment) fragmentManager.findFragmentByTag(TAG_FRAGMENT);
+        if (dFragment == null) {
+            dFragment = new DFragment();
             fragmentManager
                     .beginTransaction()
-                    .add(permissionsFragment, TAG_FRAGMENT)
+                    .add(dFragment, TAG_FRAGMENT)
                     .commitNow();
         }
-        mFragmentWeakReference = new WeakReference<>(permissionsFragment);
-    }
-
-    private void clearInnerFragment(@NonNull final FragmentActivity activity) {
-        clearInnerFragment(activity.getSupportFragmentManager());
-    }
-
-    private void clearInnerFragment(@NonNull final Fragment fragment) {
-        clearInnerFragment(fragment.getChildFragmentManager());
-    }
-
-    private void clearInnerFragment(@NonNull final FragmentManager fragmentManager) {
-        DPermissionFragment permissionsFragment = (DPermissionFragment) fragmentManager.findFragmentByTag(TAG_FRAGMENT);
-        if (permissionsFragment != null) {
-            fragmentManager
-                    .beginTransaction()
-                    .remove(permissionsFragment)
-                    .commitNow();
-        }
+        mFragmentWeakReference = new WeakReference<>(dFragment);
     }
 
     /**
      * 过滤无效的权限
      *
-     * @param permissions
-     * @return
+     * @param permissions 用户设置的权限
+     * @return 去除重复、无效后的权限
      */
     private String[] filterPermissions(String... permissions) {
         if (permissions == null || permissions.length == 0) {
@@ -134,12 +123,13 @@ public class DPermission {
      */
     @TargetApi(Build.VERSION_CODES.M)
     public void startRequest(String... permissions) {
+        // 过滤
         permissions = filterPermissions(permissions);
         if (permissions == null || permissions.length == 0) {
             return;
         }
 
-        ArrayList<PermissionBean> notRequestList = new ArrayList<>(permissions.length);
+        ArrayList<PermissionInfo> notRequestList = new ArrayList<>(permissions.length);
         ArrayList<String> needRequestList = new ArrayList<>(permissions.length);
 
         for (String permission : permissions) {
@@ -147,32 +137,45 @@ public class DPermission {
                 continue;
             }
             if (isGranted(permission)) {
-                notRequestList.add(new PermissionBean(permission, true, false));
+                // isGranted = true
+                notRequestList.add(new PermissionInfo(permission, true, false));
                 continue;
             }
             if (isRevoked(permission)) {
-                notRequestList.add(new PermissionBean(permission, false, false));
+                // isGranted = false
+                notRequestList.add(new PermissionInfo(permission, false, false));
                 continue;
             }
 
             needRequestList.add(permission);
         }
 
-        if (mPermissionCallback != null && !notRequestList.isEmpty()) {
-            mPermissionCallback.onResult(notRequestList);
-        }
+        //部分已经允许的权限，也可以在此提前返回
 
         if (!needRequestList.isEmpty()) {
-            requestPermissionsFromFragment(needRequestList.toArray(new String[needRequestList.size()]));
+            // 请求权限(有为允许且可能被用户允许的权限，需要向系统申请)
+            // 由底层一层返回结果
+            requestPermissionsFromFragment(notRequestList, needRequestList.toArray(new String[0]));
+        } else {
+            // 已经全部是不允许或者是被系统策略拒绝的权限
+            // 就算调用 requestPermissions(string, int)，系统也不会回调 onRequestPermissionsResult() 函数
+            // 此情况，只好自己向上层返回
+            if (mDCallback != null && !notRequestList.isEmpty()) {
+                mDCallback.onResult(notRequestList);
+            }
         }
     }
 
     @TargetApi(Build.VERSION_CODES.M)
-    private void requestPermissionsFromFragment(String[] permissions) {
-        if (getCurrentFragment() == null) {
+    private void requestPermissionsFromFragment(ArrayList<PermissionInfo> notRequestList, String[] permissions) {
+        DFragment fragment = getCurrentFragment();
+        if (fragment == null) {
             return;
         }
-        getCurrentFragment().requestPermissions(permissions);
+        // 保存已经允许或者系统拒绝的权限，底层一起返回
+        fragment.notRequestList = notRequestList;
+        // 底层请求权限
+        fragment.requestPermissions(permissions);
     }
 
 
@@ -181,8 +184,9 @@ public class DPermission {
      * 如果 SDK < 23，则永远返回true。
      */
     private boolean isGranted(String permission) {
+        DFragment fragment = getCurrentFragment();
         return !isMarshmallow() ||
-                (getCurrentFragment() != null && getCurrentFragment().isGranted(permission));
+                (fragment != null && fragment.isGranted(permission));
     }
 
     /**
@@ -190,7 +194,8 @@ public class DPermission {
      * 如果 SDK < 23 ，则永远返回false。
      */
     private boolean isRevoked(String permission) {
-        return isMarshmallow() && getCurrentFragment() != null && getCurrentFragment().isRevoked(permission);
+        DFragment fragment = getCurrentFragment();
+        return isMarshmallow() && fragment != null && fragment.isRevoked(permission);
     }
 
     /**
@@ -209,17 +214,15 @@ public class DPermission {
      * @DateTime: 2019-03-11 15:12
      * @Description: 请求权限fragment
      */
-    public static class DPermissionFragment extends Fragment {
+    public static class DFragment extends Fragment {
 
         private static final int PERMISSIONS_REQUEST_CODE = 1111;
 
-        private PermissionCallback mPermissionCallback;
+        private ArrayList<PermissionInfo> notRequestList;
 
-        void setPermissionCallback(PermissionCallback permissionCallback) {
-            this.mPermissionCallback = permissionCallback;
-        }
+        private DCallback mDCallback;
 
-        public DPermissionFragment() {
+        public DFragment() {
         }
 
         @Override
@@ -244,17 +247,23 @@ public class DPermission {
                 return;
             }
 
-            ArrayList<PermissionBean> permissionResultList = new ArrayList<>(permissions.length);
-
+            ArrayList<PermissionInfo> permissionResultList = new ArrayList<>(permissions.length);
             for (String permission : permissions) {
-                permissionResultList.add(new PermissionBean(permission,
+                permissionResultList.add(new PermissionInfo(permission,
                         isGranted(permission),
                         shouldShowRequestPermissionRationale(permission)));
+                // 如果想了解跟多该方法的含义，请查看 PermissionInfo 类对应属性说明
+                // shouldShowRequestPermissionRationale()
             }
 
-            if (mPermissionCallback != null && !permissionResultList.isEmpty()) {
-                // 上层回调
-                mPermissionCallback.onResult(permissionResultList);
+            if (!notRequestList.isEmpty()) {
+                // 累加上层已经确定的权限
+                permissionResultList.addAll(notRequestList);
+            }
+
+            if (mDCallback != null && !permissionResultList.isEmpty()) {
+                // 返回外层回调
+                mDCallback.onResult(permissionResultList);
             }
         }
 
@@ -291,13 +300,28 @@ public class DPermission {
      * @DateTime: 2019-03-11 15:10
      * @Description: 权限bean
      */
-    public static class PermissionBean {
-
+    public static class PermissionInfo {
+        // 权限名称
         public String name;
+        // 是否授权
         public boolean isGranted;
+
+        /**
+         * 是否需要向用户解释此权限功能。<br/>
+         * 官网说明：https://developer.android.google.cn/training/permissions/requesting.html <br/>
+         * <p>
+         * 返回 true 情况： <br/>
+         * 当用户 仅仅只是 拒绝 某项权限时，此方法返回 true。but，看 false 情况。 <br/>
+         * <p>
+         * 注意，返回 false 情况： <br/>
+         * 如果用户在过去拒绝了权限请求，并在权限请求系统对话框中选择了 Don't ask again 选项，此方法将返回 false。 <br/>
+         * 如果设备规范禁止应用具有该权限，此方法也会返回 false。 <br/>
+         */
         public boolean isShouldShowRequestPermissionRationale;
 
-        public PermissionBean(String name, boolean isGranted, boolean isShouldShowRequestPermissionRationale) {
+        public PermissionInfo(String name,
+                              boolean isGranted,
+                              boolean isShouldShowRequestPermissionRationale) {
             this.name = name;
             this.isGranted = isGranted;
             this.isShouldShowRequestPermissionRationale = isShouldShowRequestPermissionRationale;
@@ -309,12 +333,12 @@ public class DPermission {
                 return true;
             }
 
-            if (!(o instanceof PermissionBean)
+            if (!(o instanceof PermissionInfo)
                     || getClass() != o.getClass()) {
                 return false;
             }
 
-            final PermissionBean that = (PermissionBean) o;
+            final PermissionInfo that = (PermissionInfo) o;
 
             if (!name.equals(that.name)
                     || isGranted != that.isGranted
@@ -332,9 +356,9 @@ public class DPermission {
      * @DateTime: 2019-03-11 15:02
      * @Description: 权限请求回调
      */
-    public interface PermissionCallback {
+    public interface DCallback {
 
-        void onResult(ArrayList<PermissionBean> permissionBeans);
+        void onResult(ArrayList<PermissionInfo> permissionInfoList);
 
     }
 }

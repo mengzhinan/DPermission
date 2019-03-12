@@ -13,13 +13,7 @@ public class DemoActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_demo);
 
-        DPermission dPermission = new DPermission(this);
-        dPermission.setCallback(new DPermission.PermissionCallback() {
-            @Override
-            public void onResult(ArrayList<DPermission.PermissionBean> permissionBeans) {
 
-            }
-        }).startRequest(Manifest.permission.WRITE_EXTERNAL_STORAGE);
 
     }
 }
