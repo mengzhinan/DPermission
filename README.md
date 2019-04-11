@@ -1,9 +1,8 @@
 # DPermission
 
+# 非常简单好用的动态权限申请工具类，再也不用被系统权限回调逻辑困扰。
 ***
-#非常简单好用的动态权限申请工具类
-***
-#使用方法
+# 使用方法
 
 ```java
 DPermission.newInstance(this).setCallback(new DPermission.DCallback() {
@@ -16,7 +15,7 @@ DPermission.newInstance(this).setCallback(new DPermission.DCallback() {
 ```
 
 ***
-#使用 Demo
+# 使用 Demo
 ```java
 // yourPermissionString 待申请的权限
         String[] yourPermissionString = {Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.CALL_PHONE};
