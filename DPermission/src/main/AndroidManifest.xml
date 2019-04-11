@@ -2,8 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.duke.dpermission">
 
-    <application>
-        <activity android:name=".DemoActivity"></activity>
-    </application>
+    <application></application>
 
 </manifest>
